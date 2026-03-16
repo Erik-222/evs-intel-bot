@@ -15,9 +15,12 @@ async function crawlUrl(url) {
     const response = await axios.get(url, {
       timeout: 8000,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; EVSIntelBot/1.0)',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
       },
       maxRedirects: 5,
     });
@@ -71,7 +74,6 @@ async function crawlUrl(url) {
 
 async function crawlYoutube(url) {
   try {
-    // 유튜브 oEmbed API로 제목 추출
     const videoId = extractYoutubeId(url);
     if (!videoId) {
       return { success: false, error: 'YouTube ID 추출 실패', title: '', content: '', url };

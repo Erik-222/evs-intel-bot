@@ -55,7 +55,7 @@ ${content.substring(0, 4000)}`;
       generationConfig: {
         temperature: 0.3,
         maxOutputTokens: 1024,
-        responseMimeType: 'application/json',
+        responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 },
       },
     });
 
@@ -80,7 +80,7 @@ ${content.substring(0, 4000)}`;
         analysis = JSON.parse(cleaned);
       } catch {
         // 정규식으로 JSON 객체 추출
-        const jsonMatch = cleaned.match(/\\{[\\s\\S]*\\}/);
+        const fi = cleaned.indexOf('{'); const li = cleaned.lastIndexOf('}'); const jsonMatch = (fi !== -1 && li > fi) ? [cleaned.substring(fi, li + 1)] : null;
         if (jsonMatch) {
           analysis = JSON.parse(jsonMatch[0]);
         } else {

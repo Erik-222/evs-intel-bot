@@ -1,8 +1,8 @@
 /**
- * Microsoft Teams Workflows 클라이언트 — Adaptive Card로 분석 결과를 Teams 채널에 포스팅
+ * Microsoft Teams Workflows í´ë¼ì´ì¸í¸ â Adaptive Cardë¡ ë¶ì ê²°ê³¼ë¥¼ Teams ì±ëì í¬ì¤í
  *
- * Teams Workflows webhook URL로 POST 요청을 보내 채널에 메시지를 게시합니다.
- * (기존 Incoming Webhook 커넥터의 공식 대체 방식)
+ * Teams Workflows webhook URLë¡ POST ìì²­ì ë³´ë´ ì±ëì ë©ìì§ë¥¼ ê²ìí©ëë¤.
+ * (ê¸°ì¡´ Incoming Webhook ì»¤ë¥í°ì ê³µì ëì²´ ë°©ì)
  */
 
 const axios = require('axios');
@@ -10,48 +10,166 @@ const axios = require('axios');
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
 
 /**
- * Adaptive Card를 만들어 Teams 채널에 포스팅
+ * ë¶ë¦¿í¬ì¸í¸ ë°°ì´ì Adaptive Cardì© íì¤í¸ë¡ ë³í
+ */
+function formatBullets(arr) {
+  if (Array.isArray(arr)) {
+    return arr.map(item => `â¢ ${item}`).join('\n');
+  }
+  return arr || '';
+}
+
+/**
+ * Adaptive Cardë¥¼ ë§ë¤ì´ Teams ì±ëì í¬ì¤í
  */
 async function postToTeams({ title, url, userMemo, category, summary, insight, importance }) {
   if (!TEAMS_WEBHOOK_URL) {
-    console.error('TEAMS_WEBHOOK_URL이 설정되지 않았습니다.');
-    return { success: false, error: 'TEAMS_WEBHOOK_URL 미설정' };
+    console.error('TEAMS_WEBHOOK_URLì´ ì¤ì ëì§ ìììµëë¤.');
+    return { success: false, error: 'TEAMS_WEBHOOK_URL ë¯¸ì¤ì ' };
   }
 
   try {
-    // 카테고리별 색상
+    // ì¹´íê³ ë¦¬ë³ ìì
     const categoryColors = {
-      '기술동향': 'Good',        // 초록
-      '시장동향': 'Accent',      // 파랑
-      '정부정책': 'Warning',     // 노랑
-      '경쟁사/레퍼런스': 'Accent',
-      '자율주행/로봇': 'Good',
-      'EV/충전인프라켍': 'Attention', // 빨강
-      '기타': 'Default',
+      'ê¸°ì ëí¥': 'Good',
+      'ìì¥ëí¥': 'Accent',
+      'ì ë¶ì ì±': 'Warning',
+      'ê²½ìì¬/ë í¼ë°ì¤': 'Accent',
+      'ìì¨ì£¼í/ë¡ë´': 'Good',
+      'EV/ì¶©ì ì¸íë¼': 'Attention',
+      'ê¸°í': 'Default',
     };
 
-    // 중요도 표시
+    // ì¤ìë íì
     const importanceDisplay = {
-      '상': '🔴 상 (즉시 확인)',
-      '중': '🟡 중 (참고)',
-      '하': '🟢 하 (일반)',
+      'ì': 'ð´ ì (ì¦ì íì¸)',
+      'ì¤': 'ð¡ ì¤ (ì°¸ê³ )',
+      'í': 'ð¢ í (ì¼ë°)',
     };
 
     const categoryEmoji = {
-      '기술동향': '🔬',
-      '시장동향': '📈',
-      '정부정책': '🏛️',
-      '경쟁사/레퍼런스': '🏢',
-      '자율주행/로봇': '🤖',
-      'EV/충전인프라': '⚡',
-      '기타': '📌',
+      'ê¸°ì ëí¥': 'ð¬', 'ìì¥ëí¥': 'ð', 'ì ë¶ì ì±': 'ðï¸',
+      'ê²½ìì¬/ë í¼ë°ì¤': 'ð¢', 'ìì¨ì£¼í/ë¡ë´': 'ð¤',
+      'EV/ì¶©ì ì¸íë¼': 'â¡', 'ê¸°í': 'ð',
     };
 
-    const emoji = categoryEmoji[category] || '📌';
+    const emoji = categoryEmoji[category] || 'ð';
     const color = categoryColors[category] || 'Default';
     const today = new Date().toISOString().split('T')[0];
 
-    // Adaptive Card v1.4 (Teams 호환)
+    // summary/insightë¥¼ ë¶ë¦¿í¬ì¸í¸ íì¤í¸ë¡ ë³í
+    const summaryText = formatBullets(summary);
+    const insightText = formatBullets(insight);
+
+    // Adaptive Card v1.4 (Teams í¸í)
+    const cardBody = [
+      // í¤ë: ì¹´íê³ ë¦¬ + ì ëª©
+      {
+        type: 'TextBlock',
+        text: `${emoji} [${category}] ${title}`,
+        weight: 'Bolder',
+        size: 'Medium',
+        wrap: true,
+        style: color,
+      },
+      // ë©í ì ë³´
+      {
+        type: 'ColumnSet',
+        columns: [
+          {
+            type: 'Column',
+            width: 'auto',
+            items: [
+              {
+                type: 'TextBlock',
+                text: `ì¤ìë: ${importanceDisplay[importance] || 'ð¡ ì¤'}`,
+                size: 'Small',
+                isSubtle: true,
+              },
+            ],
+          },
+          {
+            type: 'Column',
+            width: 'auto',
+            items: [
+              {
+                type: 'TextBlock',
+                text: `ð ${today}`,
+                size: 'Small',
+                isSubtle: true,
+              },
+            ],
+          },
+        ],
+      },
+      // êµ¬ë¶ì 
+      {
+        type: 'TextBlock',
+        text: 'âââââââââââââââââââ',
+        size: 'Small',
+        isSubtle: true,
+        spacing: 'Small',
+      },
+      // AI ìì½ (ë¶ë¦¿í¬ì¸í°)
+      {
+        type: 'TextBlock',
+        text: 'ð **AI ìì½**',
+        weight: 'Bolder',
+        size: 'Small',
+        spacing: 'Medium',
+      },
+      {
+        type: 'TextBlock',
+        text: summaryText,
+        wrap: true,
+        size: 'Default',
+      },
+      // EVS ì¸ì¬ì´í¸ (ë¶ë¦¿í¬ì¸í¸)
+      {
+        type: 'TextBlock',
+        text: 'ð¡ **EVS ì¸ì¬ì´í¸**',
+        weight: 'Bolder',
+        size: 'Small',
+        spacing: 'Medium',
+      },
+      {
+        type: 'TextBlock',
+        text: insightText,
+        wrap: true,
+        size: 'Default',
+      },
+    ];
+
+    // ì¬ì©ì ë©ëª¨ (ìë ê²½ì°)
+    if (userMemo) {
+      cardBody.push(
+        {
+          type: 'TextBlock',
+          text: 'âï¸ **ë©ëª¨**',
+          weight: 'Bolder',
+          size: 'Small',
+          spacing: 'Medium',
+        },
+        {
+          type: 'TextBlock',
+          text: userMemo,
+          wrap: true,
+          size: 'Small',
+          isSubtle: true,
+        }
+      );
+    }
+
+    // ì¡ì ë²í¼ (URLì´ ìë ê²½ì°ìë§)
+    const actions = [];
+    if (url) {
+      actions.push({
+        type: 'Action.OpenUrl',
+        title: 'ð ìë¬¸ ë³´ê¸°',
+        url: url,
+      });
+    }
+
     const adaptiveCard = {
       type: 'message',
       attachments: [
@@ -62,109 +180,8 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
             $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
             type: 'AdaptiveCard',
             version: '1.4',
-            body: [
-              // 헤더: 카테고리 + 제목
-              {
-                type: 'TextBlock',
-                text: `${emoji} [${category}] ${title}`,
-                weight: 'Bolder',
-                size: 'Medium',
-                wrap: true,
-                style: color,
-              },
-              // 메타 정보
-              {
-                type: 'ColumnSet',
-                columns: [
-                  {
-                    type: 'Column',
-                    width: 'auto',
-                    items: [
-                      {
-                        type: 'TextBlock',
-                        text: `중요도: ${importanceDisplay[importance] || '🟡 중'}`,
-                        size: 'Small',
-                        isSubtle: true,
-                      },
-                    ],
-                  },
-                  {
-                    type: 'Column',
-                    width: 'auto',
-                    items: [
-                      {
-                        type: 'TextBlock',
-                        text: `📅 ${today}`,
-                        size: 'Small',
-                        isSubtle: true,
-                      },
-                    ],
-                  },
-                ],
-              },
-              // 구분선
-              {
-                type: 'TextBlock',
-                text: '───────────────────',
-                size: 'Small',
-                isSubtle: true,
-                spacing: 'Small',
-              },
-              // AI 요약
-              {
-                type: 'TextBlock',
-                text: '📝 **AI 요약**',
-                weight: 'Bolder',
-                size: 'Small',
-                spacing: 'Medium',
-              },
-              {
-                type: 'TextBlock',
-                text: summary,
-                wrap: true,
-                size: 'Default',
-              },
-              // EVS 인사이트
-              {
-                type: 'TextBlock',
-                text: '💡 **EVS 인사이트**',
-                weight: 'Bolder',
-                size: 'Small',
-                spacing: 'Medium',
-              },
-              {
-                type: 'TextBlock',
-                text: insight,
-                wrap: true,
-                size: 'Default',
-              },
-              // 사용자 메모 (있는 경우)
-              ...(userMemo
-                ? [
-                    {
-                      type: 'TextBlock',
-                      text: '✏️ **메모**',
-                      weight: 'Bolder',
-                      size: 'Small',
-                      spacing: 'Medium',
-                    },
-                    {
-                      type: 'TextBlock',
-                      text: userMemo,
-                      wrap: true,
-                      size: 'Small',
-                      isSubtle: true,
-                    },
-                  ]
-                : []),
-            ],
-            actions: [
-              {
-                type: 'Action.OpenUrl',
-                title: '🔗 원문 보기',
-                url: url,
-              },
-            ],
+            body: cardBody,
+            ...(actions.length > 0 ? { actions } : {}),
           },
         },
       ],
@@ -175,15 +192,15 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
       timeout: 10000,
     });
 
-    console.log(`✅ Teams 포스팅 성공: ${title}`);
+    console.log(`â Teams í¬ì¤í ì±ê³µ: ${title}`);
     return { success: true };
 
   } catch (error) {
-    console.error('Teams 포스팅 오류:', error.message);
+    console.error('Teams í¬ì¤í ì¤ë¥:', error.message);
 
     if (error.response) {
-      console.error('응답 상태:', error.response.status);
-      console.error('응답 데이터:', JSON.stringify(error.response.data).substring(0, 500));
+      console.error('ìëµ ìí:', error.response.status);
+      console.error('ìëµ ë°ì´í°:', JSON.stringify(error.response.data).substring(0, 500));
     }
 
     return { success: false, error: error.message };

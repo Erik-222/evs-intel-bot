@@ -1,8 +1,8 @@
 /**
- * Microsoft Teams Workflows í´ë¼ì´ì¸í¸ â Adaptive Cardë¡ ë¶ì ê²°ê³¼ë¥¼ Teams ì±ëì í¬ì¤í
+ * Microsoft Teams Workflows 클라이언트 — Adaptive Card로 분석 결과를 Teams 채널에 포스팅
  *
- * Teams Workflows webhook URLë¡ POST ìì²­ì ë³´ë´ ì±ëì ë©ìì§ë¥¼ ê²ìí©ëë¤.
- * (ê¸°ì¡´ Incoming Webhook ì»¤ë¥í°ì ê³µì ëì²´ ë°©ì)
+ * Teams Workflows webhook URL로 POST 요청을 보내 채널에 메시지를 게시합니다.
+ * (기존 Incoming Webhook 커넥터의 공식 대체 방숝)
  */
 
 const axios = require('axios');
@@ -10,60 +10,60 @@ const axios = require('axios');
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
 
 /**
- * ë¶ë¦¿í¬ì¸í¸ ë°°ì´ì Adaptive Cardì© íì¤í¸ë¡ ë³í
+ * 불릿포인트 배열을 Adaptive Card용 텍스트로 변환
  */
 function formatBullets(arr) {
   if (Array.isArray(arr)) {
-    return arr.map(item => `â¢ ${item}`).join('\n');
+    return arr.map(item => `• ${item}`).join('\n');
   }
   return arr || '';
 }
 
 /**
- * Adaptive Cardë¥¼ ë§ë¤ì´ Teams ì±ëì í¬ì¤í
+ * Adaptive Card를 만들어 Teams 채널에 포스팅
  */
 async function postToTeams({ title, url, userMemo, category, summary, insight, importance }) {
   if (!TEAMS_WEBHOOK_URL) {
-    console.error('TEAMS_WEBHOOK_URLì´ ì¤ì ëì§ ìììµëë¤.');
-    return { success: false, error: 'TEAMS_WEBHOOK_URL ë¯¸ì¤ì ' };
+    console.error('TEAMS_WEBHOOK_URL이 설정되지 않았습니다.');
+    return { success: false, error: 'TEAMS_WEBHOOK_URL 미설정' };
   }
 
   try {
-    // ì¹´íê³ ë¦¬ë³ ìì
+    // 카테고리별 색상
     const categoryColors = {
-      'ê¸°ì ëí¥': 'Good',
-      'ìì¥ëí¥': 'Accent',
-      'ì ë¶ì ì±': 'Warning',
-      'ê²½ìì¬/ë í¼ë°ì¤': 'Accent',
-      'ìì¨ì£¼í/ë¡ë´': 'Good',
-      'EV/ì¶©ì ì¸íë¼': 'Attention',
-      'ê¸°í': 'Default',
+      '길술동향': 'Good',
+      '시장동향': 'Accent',
+      '정부정책': 'Warning',
+      '경쟁사/레퍼런스': 'Accent',
+      '자율주행/로봇': 'Good',
+      'EV/충전인프라': 'Attention',
+      '기타': 'Default',
     };
 
-    // ì¤ìë íì
+    // 중요도 표시
     const importanceDisplay = {
-      'ì': 'ð´ ì (ì¦ì íì¸)',
-      'ì¤': 'ð¡ ì¤ (ì°¸ê³ )',
-      'í': 'ð¢ í (ì¼ë°)',
+      '상': '🔴 상 (즉시 확인)',
+      '중': '🟡 중 (참고)',
+      '하': '🟢 하 (일반)',
     };
 
     const categoryEmoji = {
-      'ê¸°ì ëí¥': 'ð¬', 'ìì¥ëí¥': 'ð', 'ì ë¶ì ì±': 'ðï¸',
-      'ê²½ìì¬/ë í¼ë°ì¤': 'ð¢', 'ìì¨ì£¼í/ë¡ë´': 'ð¤',
-      'EV/ì¶©ì ì¸íë¼': 'â¡', 'ê¸°í': 'ð',
+      '기술동향': '🔬', '시장동향': '📈', '정부정책': '🏛️',
+      '경쟁사/레퍼런스': '🏢', '자율주행/로봇': '🤖',
+      'EV/충전인프라': '⚡', '기타': '📌',
     };
 
-    const emoji = categoryEmoji[category] || 'ð';
+    const emoji = categoryEmoji[category] || '📌';
     const color = categoryColors[category] || 'Default';
     const today = new Date().toISOString().split('T')[0];
 
-    // summary/insightë¥¼ ë¶ë¦¿í¬ì¸í¸ íì¤í¸ë¡ ë³í
+    // summary/insight를 불릿포인트 텍스트로 변환
     const summaryText = formatBullets(summary);
     const insightText = formatBullets(insight);
 
-    // Adaptive Card v1.4 (Teams í¸í)
+    // Adaptive Card v1.4 (Teams 호환)
     const cardBody = [
-      // í¤ë: ì¹´íê³ ë¦¬ + ì ëª©
+      // 헤더: 카테고리 + 제목
       {
         type: 'TextBlock',
         text: `${emoji} [${category}] ${title}`,
@@ -72,7 +72,7 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
         wrap: true,
         style: color,
       },
-      // ë©í ì ë³´
+      // 메타 정보
       {
         type: 'ColumnSet',
         columns: [
@@ -82,7 +82,7 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
             items: [
               {
                 type: 'TextBlock',
-                text: `ì¤ìë: ${importanceDisplay[importance] || 'ð¡ ì¤'}`,
+                text: `중요도: ${importanceDisplay[importance] || '🟡 중'}`,
                 size: 'Small',
                 isSubtle: true,
               },
@@ -94,7 +94,7 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
             items: [
               {
                 type: 'TextBlock',
-                text: `ð ${today}`,
+                text: `📅 ${today}`,
                 size: 'Small',
                 isSubtle: true,
               },
@@ -102,18 +102,18 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
           },
         ],
       },
-      // êµ¬ë¶ì 
+      // 구분선
       {
         type: 'TextBlock',
-        text: 'âââââââââââââââââââ',
+        text: '───────────────────',
         size: 'Small',
         isSubtle: true,
         spacing: 'Small',
       },
-      // AI ìì½ (ë¶ë¦¿í¬ì¸í°)
+      // AI 요약 (불릿포인트)
       {
         type: 'TextBlock',
-        text: 'ð **AI ìì½**',
+        text: '📝 **AI 요약**',
         weight: 'Bolder',
         size: 'Small',
         spacing: 'Medium',
@@ -124,10 +124,10 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
         wrap: true,
         size: 'Default',
       },
-      // EVS ì¸ì¬ì´í¸ (ë¶ë¦¿í¬ì¸í¸)
+      // EVS 인사이트 (불릿포인트)
       {
         type: 'TextBlock',
-        text: 'ð¡ **EVS ì¸ì¬ì´í¸**',
+        text: '💡 **EVS 인사이트**',
         weight: 'Bolder',
         size: 'Small',
         spacing: 'Medium',
@@ -140,12 +140,12 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
       },
     ];
 
-    // ì¬ì©ì ë©ëª¨ (ìë ê²½ì°)
+    // 사용자 메모 (있는 경우)
     if (userMemo) {
       cardBody.push(
         {
           type: 'TextBlock',
-          text: 'âï¸ **ë©ëª¨**',
+          text: '✏️ **메모**',
           weight: 'Bolder',
           size: 'Small',
           spacing: 'Medium',
@@ -160,12 +160,12 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
       );
     }
 
-    // ì¡ì ë²í¼ (URLì´ ìë ê²½ì°ìë§)
+    // 액션 버튼 (URL이 있는 경우에만)
     const actions = [];
     if (url) {
       actions.push({
         type: 'Action.OpenUrl',
-        title: 'ð ìë¬¸ ë³´ê¸°',
+        title: '🔗 원문 보기',
         url: url,
       });
     }
@@ -192,15 +192,15 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
       timeout: 10000,
     });
 
-    console.log(`â Teams í¬ì¤í ì±ê³µ: ${title}`);
+    console.log(`✅ Teams 포스팅 성공: ${title}`);
     return { success: true };
 
   } catch (error) {
-    console.error('Teams í¬ì¤í ì¤ë¥:', error.message);
+    console.error('Teams 포스팅 오류:', error.message);
 
     if (error.response) {
-      console.error('ìëµ ìí:', error.response.status);
-      console.error('ìëµ ë°ì´í°:', JSON.stringify(error.response.data).substring(0, 500));
+      console.error('응답 상태:', error.response.status);
+      console.error('응답 데이터:', JSON.stringify(error.response.data).substring(0, 500));
     }
 
     return { success: false, error: error.message };

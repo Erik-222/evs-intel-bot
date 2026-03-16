@@ -1,116 +1,209 @@
 /**
- * Gemini AI 프로세서 — 콘텐츠 분석, 분류, 요약, 인사이트 생성
+ * Gemini AI íë¡ì¸ì â ì½íì¸  ë¶ì, ë¶ë¥, ìì½, ì¸ì¬ì´í¸ ìì±
  */
 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-const SYSTEM_PROMPT = `당신은 EV&Solution(이브이앤솔루션)의 기술 인텔리전스 분석가입니다.
-EV&Solution은 전기차 충전 인프라, 자율주행, 로봇, 에너지 관련 기술 솔루션을 제공하는 회사입니다.
+const SYSTEM_PROMPT = `ë¹ì ì EV&Solution(ì´ë¸ì´ì¤ìë£¨ì)ì ê¸°ì  ì¸íë¦¬ì ì¤ ë¶ìê°ìëë¤.
+EV&Solutionì ì ê¸°ì°¨ ì¶©ì  ì¸íë¼, ìì¨ì£¼í, ë¡ë´, ìëì§ ê´ë ¨ ê¸°ì  ìë£¨ìì ì ê³µíë íì¬ìëë¤.
 
-주어진 웹 콘텐츠를 분석하여 다음을 반드시 JSON 형식으로 반환하세요:
+ì£¼ì´ì§ ì¹ ì½íì¸ ë¥¼ ë¶ìíì¬ ë¤ìì ë°ëì JSON íìì¼ë¡ ë°ííì¸ì:
 
 {
-  "title": "핵심을 담은 한국어 제목 (30자 이내)",
-  "category": "아래 카테고리 중 하나만 선택",
-  "summary": "핵심 내용 3-4줄 요약 (한국어)",
-  "insight": "EV&Solution 관점에서의 시사점/기회/위협 2-3줄 (한국어)",
-  "importance": "상/중/하 중 하나"
+  "title": "íµì¬ì ë´ì íêµ­ì´ ì ëª© (30ì ì´ë´)",
+  "category": "ìë ì¹´íê³ ë¦¬ ì¤ íëë§ ì í",
+  "summary": ["íµì¬ ë´ì© ë¶ë¦¿í¬ì¸í¸ 1", "íµì¬ ë´ì© ë¶ë¦¿í¬ì¸í¸ 2", "íµì¬ ë´ì© ë¶ë¦¿í¬ì¸í¸ 3"],
+  "insight": ["EVS ê´ì  ì¸ì¬ì´í¸ 1", "EVS ê´ì  ì¸ì¬ì´í¸ 2"],
+  "importance": "ì/ì¤/í ì¤ íë"
 }
 
-카테고리 목록:
-- 기술동향: 새로운 기술, R&D, 특허, 기술 표준 등
-- 시장동향: 시장 규모, 트렌드, 투자, M&A, 매출 등
-- 정부정책: 규제, 법률, 보조금, 인증, 정부 발표 등
-- 경쟁사/레퍼런스: 타사 동향, 사례, 벤치마킹 등
-- 자율주행/로봇: 자율주행차, 배송로봇, AMR, 로보택시 등
-- EV/충전인프라: 전기차, 충전기, 배터리, V2G, 충전 네트워크 등
-- 기타: 위 카테고리에 해당하지 않는 경우
+summary: íµì¬ ë´ì©ì 3-4ê°ì ë¶ë¦¿í¬ì¸í¸ ë°°ì´ë¡ ìì½ (íêµ­ì´, ê° í¬ì¸í¸ë 1ë¬¸ì¥)
+insight: EV&Solution ê´ì ììì ìì¬ì /ê¸°í/ìíì 2-3ê°ì ë¶ë¦¿í¬ì¸í¸ ë°°ì´ë¡ ìì± (íêµ­ì´, ê° í¬ì¸í¸ë 1ë¬¸ì¥)
 
-중요도 판단 기준:
-- 상: EVS 사업에 직접적 영향, 즉시 공유 필요
-- 중: 참고할 만한 업계 동향
-- 하: 일반적 정보, 나중에 참고
+ì¹´íê³ ë¦¬ ëª©ë¡:
+- ê¸°ì ëí¥: ìë¡ì´ ê¸°ì , R&D, í¹í, ê¸°ì  íì¤ ë±
+- ìì¥ëí¥: ìì¥ ê·ëª¨, í¸ë ë, í¬ì, M&A, ë§¤ì¶ ë±
+- ì ë¶ì ì±: ê·ì , ë²ë¥ , ë³´ì¡°ê¸, ì¸ì¦, ì ë¶ ë°í ë±
+- ê²½ìì¬/ë í¼ë°ì¤: íì¬ ëí¥, ì¬ë¡, ë²¤ì¹ë§í¹ ë±
+- ìì¨ì£¼í/ë¡ë´: ìì¨ì£¼íì°¨, ë°°ì¡ë¡ë´, AMR, ë¡ë³´íì ë±
+- EV/ì¶©ì ì¸íë¼: ì ê¸°ì°¨, ì¶©ì ê¸°, ë°°í°ë¦¬, V2G, ì¶©ì  ë¤í¸ìí¬ ë±
+- ê¸°í: ì ì¹´íê³ ë¦¬ì í´ë¹íì§ ìë ê²½ì°
 
-반드시 유효한 JSON만 반환하세요. 다른 텍스트는 포함하지 마세요.`;
+ì¤ìë íë¨ ê¸°ì¤:
+- ì: EVS ì¬ìì ì§ì ì  ìí¥, ì¦ì ê³µì  íì
+- ì¤: ì°¸ê³ í  ë§í ìê³ ëí¥
+- í: ì¼ë°ì  ì ë³´, ëì¤ì ì°¸ê³ 
 
+ë°ëì ì í¨í JSONë§ ë°ííì¸ì. ë¤ë¥¸ íì¤í¸ë í¬í¨íì§ ë§ì¸ì.`;
+
+const POLISH_PROMPT = `ë¹ì ì EV&Solution(ì´ë¸ì´ì¤ìë£¨ì)ì ê¸°ì  ì¸íë¦¬ì ì¤ ë¶ìê°ìëë¤.
+EV&Solutionì ì ê¸°ì°¨ ì¶©ì  ì¸íë¼, ìì¨ì£¸í, ë¡ë´, ìëì§ ê´ë ¨ ê¸°ì  ìë£¨ìì ì ê³µíë íì¬ìëë¤.
+
+ì¬ì©ìê° ì§ì  ìì±í ìì½/ì¸ì¬ì´í¸ íì¤í¸ë¥¼ ë¤ë¬ì´ì ì ëë ë¶ë¦¿í¬ì¸í¸ íìì¼ë¡ ì ë¦¬í´ì£¼ì¸ì.
+ë¬¸ì¥ì ë§¤ëë½ê² ë¤ë¬ë, ìë ìë¯¸ì íµì¬ ì ë³´ë ì ì§íì¸ì.
+
+ë¤ìì ë°ëì JSON íìì¼ë¡ ë°ííì¸ì:
+
+{
+  "title": "íµì¬ì ë´ì íêµ­ì´ ì ëª© (30ì ì´ë´)",
+  "category": "ìë ì¹´íê³ ë¦¬ ì¤ íëë§ ì í",
+  "summary": ["ìì½ ë¶ë¦¿í¬ì¸í¸ 1", "ìì½ ë¶ë¦¿í¬ì¸í¸ 2", "ìì½ ë¶ë¦¿í¬ì¸í¸ 3"],
+  "insight": ["ì¸ì¬ì´í¸ ë¶ë¦¿í¬ì¸í¸ 1", "ì¸ì¬ì´í¸ ë¶ë¦¿í¬ì¸í¸ 2"],
+  "importance": "ì/ì¤/í ì¤ íë"
+}
+
+ì¹´íê³ ë¦¬ ëª©ë¡:
+- ê¸°ì ëí¥ / ìì¥ëí¥ / ì ë¶ì ì± / ê²½ìì¬/ë í¼ë°ì¤ / ìì¨ì£¼í/ë¡ë´ / EV/ì¶©ì ì¸íë¼ / ê¸°í
+
+ë°ëì ì í¨í JSONë§ ë°ííì¸ì. ë¤ë¥¸ íì¤í¸ë í¬í¨íì§ ë§ì¸ì.`;
+
+/**
+ * JSON íì± í¬í¼ â ë¤ìí íìì AI ìëµìì JSONì ìì íê² ì¶ì¶
+ */
+function parseAIResponse(responseText) {
+  // 1ì°¨ ìë: ì§ì  íì±
+  try {
+    return JSON.parse(responseText);
+  } catch {}
+
+  // 2ì°¨ ìë: ë§í¬ë¤ì´ ì½ëë¸ë¡ ì ê±° í íì±
+  let cleaned = responseText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {}
+
+  // 3ì°¨ ìë: ì ê·ìì¼ë¡ JSON ê°ì²´ ì¶ì¶
+  const fi = cleaned.indexOf('{');
+  const li = cleaned.lastIndexOf('}');
+  if (fi !== -1 && li > fi) {
+    return JSON.parse(cleaned.substring(fi, li + 1));
+  }
+
+  throw new Error('AI ìëµìì JSON ì¶ì¶ ì¤í¨');
+}
+
+/**
+ * summary/insightë¥¼ ë°°ì´ë¡ ì ê·í (íì í¸í)
+ */
+function normalizeToArray(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    // ì¤ë°ê¿ì´ë ë¶ë¦¿ì¼ë¡ êµ¬ë¶ë ê²½ì° ë°°ì´ë¡ ë³í
+    return value
+      .split(/\n/)
+      .map(line => line.replace(/^[-â¢Â·]\s*/, '').trim())
+      .filter(line => line.length > 0);
+  }
+  return ['ë´ì© ìì'];
+}
+
+/**
+ * ì¹ ì½íì¸  ë¶ì (í¬ë¡ë§ ì±ê³µ ì)
+ */
 async function analyzeContent(title, content, url, userMemo) {
   try {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-    const userPrompt = `다음 웹 콘텐츠를 분석해주세요.
+    const userPrompt = `ë¤ì ì¹ ì½íì¸ ë¥¼ ë¶ìí´ì£¼ì¸ì.
 
-제목: ${title}
+ì ëª©: ${title}
 URL: ${url}
-${userMemo ? `사용자 메모: ${userMemo}` : ''}
+${userMemo ? `ì¬ì©ì ë©ëª¨: ${userMemo}` : ''}
 
-본문:
+ë³¸ë¬¸:
 ${content.substring(0, 4000)}`;
 
     const result = await model.generateContent({
       contents: [
-        { role: 'user', parts: [{ text: SYSTEM_PROMPT + '\\n\\n' + userPrompt }] }
+        { role: 'user', parts: [{ text: SYSTEM_PROMPT + '\n\n' + userPrompt }] }
       ],
       generationConfig: {
         temperature: 0.3,
         maxOutputTokens: 1024,
-        responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 },
+        responseMimeType: 'application/json',
+        thinkingConfig: { thinkingBudget: 0 },
       },
     });
 
     const responseText = result.response.text();
-    console.log('AI 원본 응답 (앞 500자):', responseText.substring(0, 500));
+    console.log('AI ìë³¸ ìëµ (ì 500ì):', responseText.substring(0, 500));
 
-    // JSON 파싱
-    let analysis;
-    try {
-      analysis = JSON.parse(responseText);
-    } catch {
-      // JSON 파싱 실패 시 다양한 방법으로 JSON 추출 시도
-      let cleaned = responseText;
+    const analysis = parseAIResponse(responseText);
 
-      // 마크다운 코드블록 제거
-      cleaned = cleaned.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
-
-      // 앞뒤 공백 제거
-      cleaned = cleaned.trim();
-
-      try {
-        analysis = JSON.parse(cleaned);
-      } catch {
-        // 정규식으로 JSON 객체 추출
-        const fi = cleaned.indexOf('{'); const li = cleaned.lastIndexOf('}'); const jsonMatch = (fi !== -1 && li > fi) ? [cleaned.substring(fi, li + 1)] : null;
-        if (jsonMatch) {
-          analysis = JSON.parse(jsonMatch[0]);
-        } else {
-          console.error('JSON 추출 실패. 원본 응답:', responseText.substring(0, 300));
-          throw new Error('AI 응답에서 JSON 추출 실패');
-        }
-      }
-    }
-
-    // 기본값 설정
     return {
       title: analysis.title || title,
-      category: analysis.category || '기타',
-      summary: analysis.summary || '요약을 생성하지 못했습니다.',
-      insight: analysis.insight || '인사이트를 생성하지 못했습니다.',
-      importance: analysis.importance || '중',
+      category: analysis.category || 'ê¸°í',
+      summary: normalizeToArray(analysis.summary),
+      insight: normalizeToArray(analysis.insight),
+      importance: analysis.importance || 'ì¤',
     };
 
   } catch (error) {
-    console.error('AI 분석 오류:', error.message);
+    console.error('AI ë¶ì ì¤ë¥:', error.message);
 
-    // 폴백: AI 실패 시 기본 정보만 반환
     return {
       title: title || 'Untitled',
-      category: '기타',
-      summary: `AI 분석 실패. 원문 제목: ${title}`,
-      insight: '수동 분석이 필요합니다.',
-      importance: '중',
+      category: 'ê¸°í',
+      summary: [`AI ë¶ì ì¤í¨. ìë¬¸ ì ëª©: ${title}`],
+      insight: ['ìë ë¶ìì´ íìí©ëë¤.'],
+      importance: 'ì¤',
     };
   }
 }
 
-module.exports = { analyzeContent };
+/**
+ * ì¬ì©ì ì§ì  ìë ¥ íì¤í¸ë¥¼ ë¤ë¬ì´ì ë¶ë¦¿í¬ì¸í¸ë¡ ì ë¦¬ (í¬ë¡ë§ ì¤í¨ ì)
+ */
+async function polishUserSummary(userText, url) {
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+    const userPrompt = `ì¬ì©ìê° ì§ì  ìì±í íì¤í¸ë¥¼ ë¤ë¬ì´ì£¼ì¸ì.
+${url ? `ê´ë ¨ URL: ${url}` : ''}
+
+ì¬ì©ì ìë ¥:
+${userText.substring(0, 3000)}`;
+
+    const result = await model.generateContent({
+      contents: [
+        { role: 'user', parts: [{ text: POLISH_PROMPT + '\n\n' + userPrompt }] }
+      ],
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: 1024,
+        responseMimeType: 'application/json',
+        thinkingConfig: { thinkingBudget: 0 },
+      },
+    });
+
+    const responseText = result.response.text();
+    console.log('Polish AI ìëµ (ì 500ì):', responseText.substring(0, 500));
+
+    const analysis = parseAIResponse(responseText);
+
+    return {
+      title: analysis.title || 'ì¬ì©ì ìì½',
+      category: analysis.category || 'ê¸°í',
+      summary: normalizeToArray(analysis.summary),
+      insight: normalizeToArray(analysis.insight),
+      importance: analysis.importance || 'ì¤',
+    };
+
+  } catch (error) {
+    console.error('Polish AI ì¤ë¥:', error.message);
+
+    // í´ë°±: ì¬ì©ì íì¤í¸ë¥¼ ê·¸ëë¡ ë¶ë¦¿í¬ì¸í¸ë¡
+    const lines = userText.split(/\n/).map(l => l.trim()).filter(l => l.length > 0);
+    return {
+      title: 'ì¬ì©ì ìì½',
+      category: 'ê¸°í',
+      summary: lines.length > 0 ? lines : ['ì¬ì©ì ìë ¥ ë´ì©'],
+      insight: ['AI ë¤ë¬ê¸° ì¤í¨ â ìë¬¸ ê·¸ëë¡ ê²ì'],
+      importance: 'ì¤',
+    };
+  }
+}
+
+module.exports = { analyzeContent, polishUserSummary };

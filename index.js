@@ -1,14 +1,17 @@
 /**
- * EVS Intel Bot - 카카오톡 챗봇 웹훅 서버
+ * EVS Intel Bot - 카카오톡 챗봇 웹훅 서버 v4.0
  *
- * 흐름 A: 카톡 URL 수신 → 크롤링 → Gemini AI 분석 → Teams 포스팅 (불릿포인트) → 카톡 응답
- * 흐름 B: 크롤링 실패 → 유저에게 직접 요약 요청 → 유저가 텍스트 전송 → AI 다듬기 → Teams 포스팅
+ * 흐름: 카톡 수신 → 크롤링/분석 → 미리보기 → 수정 피드백 → "확인" → Teams 포스팅
+ *
+ * 1. URL 또는 텍스트 수신 → AI 분석 → 카톡으로 미리보기 전송
+ * 2. 사용자 수정의견 → AI 재수정 → 새 미리보기 전송
+ * 3. "확인" 입력 → Teams 채널에 포스팅
  */
 
 require('dotenv').config();
 const express = require('express');
 const { crawlUrl } = require('./crawler');
-const { analyzeContent, polishUserSummary } = require('./ai-processor');
+const { analyzeContent, polishUserSummary, reviseAnalysis } = require('./ai-processor');
 const { postToTeams } = require('./teams-client');
 
 const app = express();
@@ -16,15 +19,61 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// ===== 불릿포인트 포맷 헬퍼 =====
+// ===== 상태 관리: 확인 대기 중인 포스트 =====
+const pendingPosts = new Map();
+
+// 만료 시간 (30분)
+const PENDING_EXPIRY_MS = 30 * 60 * 1000;
+
+// 주기적으로 만료된 항목 정리 (5분마다)
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of pendingPosts.entries()) {
+    if (now - value.createdAt > PENDING_EXPIRY_MS) {
+      pendingPosts.delete(key);
+      console.log(`[만료 삭제] userId: ${key}`);
+    }
+  }
+}, 5 * 60 * 1000);
+
+// ===== 불릿포인트 포맷 얬퍼 =====
 function formatBullets(arr) {
   if (!Array.isArray(arr)) return arr;
   return arr.map(item => `• ${item}`).join('\n');
 }
 
-// ===== 여스체크 =====
+// ===== 미리보기 텍스트 생성 =====
+function buildPreviewText(analysis, url) {
+  const categoryEmoji = {
+    '기술동향': '🔬', '시장동향': '📈', '정부정책': '🏛️',
+    '경쟁사/레퍼런스': '🏢', '자율주행/로봇': '🤖',
+    'EV/충전인프라': '⚡', '기타': '📌',
+  };
+  const emoji = categoryEmoji[analysis.category] || '📌';
+  const importanceStars = { '상': '⭐⭐⭐', '중': '⭐⭐', '하': '⭐' };
+
+  let preview =
+    `📋 Teams 포스팅 미리보기\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `${emoji} [${analysis.category}] ${analysis.title}\n\n` +
+    `📝 요약:\n${formatBullets(analysis.summary)}\n\n` +
+    `💡 인사이트:\n${formatBullets(analysis.insight)}\n\n` +
+    `중요도: ${importanceStars[analysis.importance] || '⭐⭐'}`;
+
+  if (url) {
+    preview += `\n🔗 ${url}`;
+  }
+
+  preview += `\n━━━━━━━━━━━━━━━\n`;
+  preview += `✅ "확인" → Teams에 포스팅\n`;
+  preview += `✏️ 수정사항 입력 → 재수정`;
+
+  return preview;
+}
+
+// ===== 헬스체크 =====
 app.get('/', (req, res) => {
-  res.status(200).json({ status: 'ok', bot: 'EVS Intel Bot', version: '3.0.0' });
+  res.status(200).json({ status: 'ok', bot: 'EVS Intel Bot', version: '4.0.0' });
 });
 
 // ===== 카카오 오픈빌더 스킬 테스트용 GET =====
@@ -41,97 +90,165 @@ app.post('/webhook', async (req, res) => {
     const userRequest = body.userRequest || {};
     const userMessage = userRequest.utterance || '';
 
-    console.log(`[${new Date().toISOString()}] 수신: ${userMessage.substring(0, 100)}`);
+    // 사용자 정보 추출
+    const userId = (userRequest.user && userRequest.user.id) || 'unknown';
+    const userProps = (userRequest.user && userRequest.user.properties) || {};
+    const userNickname = userProps.nickname || userProps.nickName || '알 수 없음';
 
-    // URL 추출
+    console.log(`[${new Date().toISOString()}] 수신 (${userNickname}/${userId.substring(0, 8)}): ${userMessage.substring(0, 100)}`);
+
+    const trimmed = userMessage.trim();
+
+    // ===== 1. "확인" 명령 처리 =====
+    if (trimmed === '확인') {
+      const pending = pendingPosts.get(userId);
+      if (!pending) {
+        const elapsed = Date.now() - startTime;
+        console.log(`[DEBUG] 확인 - 대기 없음 (${elapsed}ms)`);
+        return res.status(200).json(buildTextResponse(
+          '⚠️ 확인할 대기 중인 포스팅이 없어요.\n\n' +
+          '링크나 요약 텍스트를 먼저 보내주세요!'
+        ));
+      }
+
+      // Teams에 포스팅
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 3500));
+      const postPromise = postToTeams({
+        title: pending.analysis.title,
+        url: pending.url || '',
+        userMemo: pending.userMemo || '',
+        category: pending.analysis.category,
+        summary: pending.analysis.summary,
+        insight: pending.analysis.insight,
+        importance: pending.analysis.importance,
+        author: pending.author || userNickname,
+      });
+
+      const result = await Promise.race([postPromise, timeoutPromise]);
+
+      if (result) {
+        pendingPosts.delete(userId);
+        const emoji = result.success ? '✅' : '⚠️';
+        const msg = result.success
+          ? '✅ Teams 포스팅 완료!'
+          : '⚠️ Teams 포스팅 실패. 다시 "확인"을 입력해주세요.';
+        const elapsed = Date.now() - startTime;
+        console.log(`[DEBUG] 확인 처리 (${elapsed}ms) - ${result.success ? '성공' : '실패'}`);
+        return res.status(200).json(buildTextResponse(msg));
+      } else {
+        // 백그라운드 포스팅
+        postPromise.then(r => {
+          if (r && r.success) pendingPosts.delete(userId);
+          console.log('백그라운드 Teams 포스팅 결과:', r);
+        }).catch(err => console.error('백그라운드 Teams 오류:', err));
+
+        const elapsed = Date.now() - startTime;
+        console.log(`[DEBUG] 확인 - 타임아웃, 백그라운드 처리 (${elapsed}ms)`);
+        return res.status(200).json(buildTextResponse(
+          '📤 Teams에 포스팅 중이에요. 잠시만 기다려주세요!'
+        ));
+      }
+    }
+
+    // ===== 2. URL 추출 =====
     const urlRegex = /(https?:\/\/[^\s]+)/gi;
     const urls = userMessage.match(urlRegex);
 
-    if (!urls || urls.length === 0) {
-      // URL 없음 → 수동 요약 텍스트인지 판단
-      const trimmed = userMessage.trim();
+    if (urls && urls.length > 0) {
+      // URL 있음 → 크로링+분석 후 미리보기
+      const url = urls[0];
+      const userMemo = userMessage.replace(urlRegex, '').trim();
 
-      if (trimmed.length >= 15) {
-        // 15자 이상이면 수동 요약으로 처리
-        console.log(`[수동 요약] 텍스트 길이: ${trimmed.length}`);
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 3500));
+      const processPromise = processLinkPreview(url, userMemo, userId, userNickname);
+      const result = await Promise.race([processPromise, timeoutPromise]);
 
-        const timeoutPromise = new Promise((resolve) => {
-          setTimeout(() => resolve(null), 3500);
-        });
-
-        const processPromise = processManualSummary(trimmed);
-        const result = await Promise.race([processPromise, timeoutPromise]);
-
-        let response;
-        if (result) {
-          response = buildTextResponse(result);
-        } else {
-          processPromise
-            .then(r => console.log('수동 요약 백그라운드 완료:', r))
-            .catch(err => console.error('수동 요약 백그라운드 오류:', err));
-          response = buildTextResponse(
-            '📥 요약 접수 완료!\n\n다듬어서 Teams에 올리는 중이에요. 잠시만 기다려주세요.'
-          );
-        }
-
-        const elapsed = Date.now() - startTime;
-        console.log(`[DEBUG] 수동 요약 응답 (${elapsed}ms)`);
-        return res.status(200).json(response);
+      let response;
+      if (result) {
+        response = buildTextResponse(result);
+      } else {
+        processPromise
+          .then(r => console.log('백그라운드 링크 처리 완료'))
+          .catch(err => console.error('백그라운드 링크 오류:', err));
+        response = buildTextResponse(
+          `📥 링크 접수 완료!\n${url}\n\n분석 중이에요. 잠시 후 다시 보내주세요.`
+        );
       }
 
-      // 짧은 텍스트 → 안내 메시지
-      const response = buildTextResponse(
-        '📎 링크를 보내주시면 자동으로 분석해서 Teams에 포스팅해드려요!\n\n' +
-        '또는 요약/인사이트를 직접 입력하시면 다듬어서 Teams에 올려드릴게요.\n\n' +
-        '예시 1: https://example.com/article\n' +
-        '예시 2: 전기차 충전 시장이 2025년 10조원 규모로 성장...'
-      );
+      const elapsed = Date.now() - startTime;
+      console.log(`[DEBUG] URL 처리 응답 (${elapsed}ms)`);
       return res.status(200).json(response);
     }
 
-    // URL 있음 → 기존 크롤링+분석 플로우
-    const url = urls[0];
-    const userMemo = userMessage.replace(urlRegex, '').trim();
+    // ===== 3. 대기 중인 포스트가 있을 때 → 수정 피드백 =====
+    const pending = pendingPosts.get(userId);
+    if (pending && trimmed.length >= 2) {
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 3500));
+      const revisePromise = processRevision(userId, trimmed, userNickname);
+      const result = await Promise.race([revisePromise, timeoutPromise]);
 
-    const timeoutPromise = new Promise((resolve) => {
-      setTimeout(() => resolve(null), 3500);
-    });
+      let response;
+      if (result) {
+        response = buildTextResponse(result);
+      } else {
+        revisePromise
+          .then(r => console.log('백그라운드 수정 완료'))
+          .catch(err => console.error('백그라운드 수정 오류:', err));
+        response = buildTextResponse(
+          '📝 수정 반영 중이에요. 잠시만 기다려주세요.'
+        );
+      }
 
-    const processPromise = processLink(url, userMemo);
-    const result = await Promise.race([processPromise, timeoutPromise]);
-
-    let response;
-    if (result) {
-      response = buildTextResponse(result);
-    } else {
-      processPromise
-        .then(r => console.log('백그라운드 처리 완료:', r))
-        .catch(err => console.error('백그라운드 오류:', err));
-      response = buildTextResponse(
-        `📥 링크 접수 완료!\n${url}\n\n분석 중이에요. 잠시 후 Teams 채널에서 확인하세요.`
-      );
+      const elapsed = Date.now() - startTime;
+      console.log(`[DEBUG] 수정 처리 응답 (${elapsed}ms)`);
+      return res.status(200).json(response);
     }
 
-    const elapsed = Date.now() - startTime;
-    console.log(`[DEBUG] 응답 전송 (${elapsed}ms)`);
-    return res.status(200).json(response);
+    // ===== 4. URL 없음 + 대기 없음 + 15자 이상 → 수동 요약 =====
+    if (trimmed.length >= 15) {
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 3500));
+      const processPromise = processManualSummaryPreview(trimmed, userId, userNickname);
+      const result = await Promise.race([processPromise, timeoutPromise]);
+
+      let response;
+      if (result) {
+        response = buildTextResponse(result);
+      } else {
+        processPromise
+          .then(r => console.log('수동 요약 백그라운드 완료'))
+          .catch(err => console.error('수동 요약 백그라운드 오류:', err));
+        response = buildTextResponse(
+          '📥 요약 접수 완료!\n\n분석 중이에요. 잠시 후 다시 보내주세요.'
+        );
+      }
+
+      const elapsed = Date.now() - startTime;
+      console.log(`[DEBUG] 수동 요약 응답 (${elapsed}ms)`);
+      return res.status(200).json(response);
+    }
+
+    // ===== 5. 짧은 텍스트 → 안내 메시지 =====
+    return res.status(200).json(buildTextResponse(
+      '📎 링크를 보내주시면 자동으로 분석해서 Teams에 포스팅해드려요!\n\n' +
+      '또는 요약/인사이트를 직접 입력하시면 다든어서 Teams에 올려드릴게요.\n\n' +
+      '예시 1: https://example.com/article\n' +
+      '예시 2: 전기차 충전 시장이 2025년 10조원 규모로 성장...'
+    ));
 
   } catch (error) {
     console.error('웹훅 처리 오류:', error);
-    const response = buildTextResponse('처리 중 오류가 발생했어요. 다시 시도해주세요.');
-    return res.status(200).json(response);
+    return res.status(200).json(buildTextResponse('처리 중 오류가 발생했어요. 다시 시도해주세요.'));
   }
 });
 
-// ===== 링크 처리 파이프라인 =====
-async function processLink(url, userMemo) {
+// ===== 링크 처리 → 미리보기 (Teams에 바로 안 올릸) =====
+async function processLinkPreview(url, userMemo, userId, userNickname) {
   try {
     // 1. 크롤링
     console.log(`[크롤링] ${url}`);
     const crawled = await crawlUrl(url);
 
     if (!crawled.success) {
-      // 크롤링 실패 → 유저에게 직접 요약 요청
       console.log(`[크롤링 실패] ${url}: ${crawled.error}`);
       return (
         `⚠️ 링크를 읽을 수 없었어요.\n${url}\n\n` +
@@ -144,80 +261,69 @@ async function processLink(url, userMemo) {
     console.log(`[AI 분석] ${crawled.title}`);
     const analysis = await analyzeContent(crawled.title, crawled.content, url, userMemo);
 
-    // 3. Teams 채널 포스팅
-    console.log(`[Teams 포스팅] ${analysis.title}`);
-    const teamsResult = await postToTeams({
-      title: analysis.title,
-      url: url,
-      userMemo: userMemo,
-      category: analysis.category,
-      summary: analysis.summary,
-      insight: analysis.insight,
-      importance: analysis.importance,
+    // 3. 대기 상태에 저장 (Teams에 바로 안 올릸)
+    pendingPosts.set(userId, {
+      analysis,
+      url,
+      userMemo,
+      author: userNickname,
+      createdAt: Date.now(),
     });
 
-    // 4. 카톡 응답 생성
-    const categoryEmoji = {
-      '기술동향': '🔬', '시장동향': '📈', '정부정책': '🏛️',
-      '경쟁사/레퍼런스': '🏢', '자율주행/로봇': '🤖',
-      'EV/충전인프라': '⚡', '기타': '📌',
-    };
+    console.log(`[미리보기 저장] userId: ${userId.substring(0, 8)}, title: ${analysis.title}`);
 
-    const emoji = categoryEmoji[analysis.category] || '📌';
-    const importanceStars = { '상': '⭐⭐⭐', '중': '⭐⭐', '하': '⭐' };
-    const teamsStatus = teamsResult.success ? '✅ Teams 포스팅 완료' : '⚠️ Teams 포스팅 실패 (로그 확인)';
-
-    return (
-      `${emoji} [${analysis.category}] ${analysis.title}\n\n` +
-      `📝 요약:\n${formatBullets(analysis.summary)}\n\n` +
-      `💡 EVS 인사이트:\n${formatBullets(analysis.insight)}\n\n` +
-      `중요도: ${importanceStars[analysis.importance] || '⭐⭐'}\n` +
-      teamsStatus
-    );
+    // 4. 미리보기 반환
+    return buildPreviewText(analysis, url);
   } catch (error) {
-    console.error('processLink 오류:', error);
+    console.error('processLinkPreview 오류:', error);
     return `❌ 처리 중 오류 발생\n${url}\n\n사유: ${error.message}`;
   }
 }
 
-// ===== 수동 요약 처리 파이프라인 =====
-async function processManualSummary(userText) {
+// ===== 수동 요약 → 미리보기 (Teams에 바로 숈 올림) =====
+async function processManualSummaryPreview(userText, userId, userNickname) {
   try {
-    // 1. AI로 다듬기
     console.log(`[수동 요약 처리] 텍스트: ${userText.substring(0, 50)}...`);
     const analysis = await polishUserSummary(userText);
 
-    // 2. Teams 포스팅
-    console.log(`[Teams 포스팅] ${analysis.title} (수동 요약)`);
-    const teamsResult = await postToTeams({
-      title: analysis.title,
+    // 대기 상태에 저장
+    pendingPosts.set(userId, {
+      analysis,
       url: '',
       userMemo: '',
-      category: analysis.category,
-      summary: analysis.summary,
-      insight: analysis.insight,
-      importance: analysis.importance,
+      author: userNickname,
+      createdAt: Date.now(),
     });
 
-    // 3. 카톡 응답
-    const categoryEmoji = {
-      '기술동향': '🔬', '시장동향': '📈', '정부정책': '🏛️',
-      '경쟁사/레퍼런스': '🏢', '자율주행/로봇': '🤖',
-      'EV/충전인프라': '⚡', '기타': '📌',
-    };
-
-    const emoji = categoryEmoji[analysis.category] || '📌';
-    const teamsStatus = teamsResult.success ? '✅ Teams 포스팅 완료' : '⚠️ Teams 포스팅 실패';
-
-    return (
-      `${emoji} [${analysis.category}] ${analysis.title}\n\n` +
-      `📝 요약:\n${formatBullets(analysis.summary)}\n\n` +
-      `💡 EVS 인사이트:\n${formatBullets(analysis.insight)}\n\n` +
-      teamsStatus
-    );
+    console.log(`[미리보기 저장] userId: ${userId.substring(0, 8)}, title: ${analysis.title}`);
+    return buildPreviewText(analysis, '');
   } catch (error) {
-    console.error('processManualSummary 오류:', error);
+    console.error('processManualSummaryPreview 오류:', error);
     return `❌ 요약 처리 중 오류가 발생했어요.\n사유: ${error.message}\n\n다시 시도해주세요.`;
+  }
+}
+
+// ===== 수정 피드백 처리 =====
+async function processRevision(userId, feedback, userNickname) {
+  try {
+    const pending = pendingPosts.get(userId);
+    if (!pending) return '⚠️ 수정할 대기 중인 포스팅이 없어요.';
+
+    console.log(`[수정 요청] 피드백: ${feedback.substring(0, 50)}...`);
+    const revised = await reviseAnalysis(pending.analysis, feedback);
+
+    // 대기 상태 업데이트
+    pendingPosts.set(userId, {
+      ...pending,
+      analysis: revised,
+      createdAt: Date.now(),
+    });
+
+    console.log(`[수정 완료] title: ${revised.title}`);
+    return buildPreviewText(revised, pending.url);
+  } catch (error) {
+    console.error('processRevision 오류:', error);
+    return `❌ 수정 중 오류가 발생했어요.\n사유: ${error.message}\n\n다시 시도해주세요.`;
   }
 }
 
@@ -239,6 +345,6 @@ function buildTextResponse(text) {
 
 // ===== 서버 시작 =====
 app.listen(PORT, () => {
-  console.log(`🚀 EVS Intel Bot 서버 시작: http://localhost:${PORT}`);
+  console.log(`🚀 EVS Intel Bot v4.0 서버 시작: http://localhost:${PORT}`);
   console.log(`📡 웹훅 URL: http://localhost:${PORT}/webhook`);
 });

@@ -1,5 +1,5 @@
 /**
- * EVS Intel Bot - 카카오톡 챗봇 웹훕 서버 v5.1
+ * EVS Intel Bot - 카카오톡 챗봇 웹훅 서버 v5.3
  *
  * 흐름: 카톡 수신 → 크롤링/분석 → 카톡 프리뷰 → 확인/수정 → Teams 게시
  *
@@ -39,7 +39,7 @@ setInterval(() => {
 
 // ===== 불릿포인트 포맷 헬퍼 =====
 function formatBullets(arr) {
-  if (!Array.isArray(arr)) return arr;
+  if (!Array.isArray(arr)) return arr || '';
   return arr.map(item => `• ${item}`).join('\n');
 }
 
@@ -56,8 +56,9 @@ function buildPreviewText(analysis, url) {
     `📋 요약 프리뷰\n` +
     `━━━━━━━━━━━━━━━\n` +
     `${emoji} [${analysis.category}] ${analysis.title}\n\n` +
-    `📝 요약:\n${formatBullets(analysis.summary)}\n\n` +
-    `💡 인사이트:\n${formatBullets(analysis.insight)}`;
+    `❓ 이게 무엇인가?\n${formatBullets(analysis.summary_what)}\n\n` +
+    `🔍 핵심 분석\n${formatBullets(analysis.summary_analysis)}\n\n` +
+    `💡 EVS 활용\n${formatBullets(analysis.summary_evs)}`;
 
   if (url) {
     text += `\n🔗 ${url}`;
@@ -91,9 +92,9 @@ function buildPostedText(analysis, url) {
   return text;
 }
 
-// ===== 헬스체크 =====
+// ===== 여스체크 =====
 app.get('/', (req, res) => {
-  res.status(200).json({ status: 'ok', bot: 'EVS Intel Bot', version: '5.1.0' });
+  res.status(200).json({ status: 'ok', bot: 'EVS Intel Bot', version: '5.3.0' });
 });
 
 // ===== 카카오 오픈빌더 스킬 테스트용 GET =====
@@ -138,8 +139,9 @@ app.post('/webhook', async (req, res) => {
         url: pending.url || '',
         userMemo: pending.userMemo || '',
         category: pending.analysis.category,
-        summary: pending.analysis.summary,
-        insight: pending.analysis.insight,
+        summary_what: pending.analysis.summary_what,
+        summary_analysis: pending.analysis.summary_analysis,
+        summary_evs: pending.analysis.summary_evs,
         importance: pending.analysis.importance,
         author: pending.author,
       });
@@ -247,7 +249,7 @@ app.post('/webhook', async (req, res) => {
     // ===== 5. 짧은 텍스트 → 안내 메시지 =====
     return res.status(200).json(buildTextResponse(
       '📎 링크를 보내주시면 자동으로 분석해서 프리뷰를 보내드려요!\n\n' +
-      '또는 요약/인사이트를 직접 입력하시면 다듬어서 프리뷰를 보내드릴게요.\n\n' +
+      '또는 요약/인사이트를 직접 입력한시면 다듬어서 프리뷰를 보내드릴게요.\n\n' +
       '예시 1: https://example.com/article\n' +
       '예시 2: 전기차 충전 시장이 2025년 10조원 규모로 성장...'
     ));
@@ -368,6 +370,6 @@ function buildTextResponse(text) {
 
 // ===== 서버 시작 =====
 app.listen(PORT, () => {
-  console.log(`🚀 EVS Intel Bot v5.1 서버 시작: http://localhost:${PORT}`);
+  console.log(`🚀 EVS Intel Bot v5.3 서버 시작: http://localhost:${PORT}`);
   console.log(`📡 웹훅 URL: http://localhost:${PORT}/webhook`);
 });

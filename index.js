@@ -1,5 +1,5 @@
 /**
- * EVS Intel Bot - 카카오톡 챗봇 웹훅 서버 v4.0
+ * EVS Intel Bot - 카카오톁 챗봇 웹훅 서버 v4.1
  *
  * 흐름: 카톡 수신 → 크롤링/분석 → 미리보기 → 수정 피드백 → "확인" → Teams 포스팅
  *
@@ -36,7 +36,7 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-// ===== 불릿포인트 포맷 얬퍼 =====
+// ===== 불릿포인트 포맷 여퍼 =====
 function formatBullets(arr) {
   if (!Array.isArray(arr)) return arr;
   return arr.map(item => `• ${item}`).join('\n');
@@ -73,7 +73,7 @@ function buildPreviewText(analysis, url) {
 
 // ===== 헬스체크 =====
 app.get('/', (req, res) => {
-  res.status(200).json({ status: 'ok', bot: 'EVS Intel Bot', version: '4.0.0' });
+  res.status(200).json({ status: 'ok', bot: 'EVS Intel Bot', version: '4.1.0' });
 });
 
 // ===== 카카오 오픈빌더 스킬 테스트용 GET =====
@@ -165,13 +165,19 @@ app.post('/webhook', async (req, res) => {
 
       let response;
       if (result) {
+        // 시간 내 완료 → 미리보기 표시됨
+        const p = pendingPosts.get(userId);
+        if (p) p.previewed = true;
         response = buildTextResponse(result);
       } else {
         processPromise
-          .then(r => console.log('백그라운드 링크 처리 완료'))
+          .then(r => {
+            // 백그라운드 완료 → previewed는 false 유지 (다음 메시지에서 미리보기 표시)
+            console.log('백그라운드 링크 처리 완료');
+          })
           .catch(err => console.error('백그라운드 링크 오류:', err));
         response = buildTextResponse(
-          `📥 링크 접수 완료!\n${url}\n\n분석 중이에요. 잠시 후 다시 보내주세요.`
+          `📥 링크 접수 완료!\n${url}\n\n분석 중이에요. 잠시 후 아무 메시지나 보내주세요!`
         );
       }
 
@@ -180,22 +186,39 @@ app.post('/webhook', async (req, res) => {
       return res.status(200).json(response);
     }
 
-    // ===== 3. 대기 중인 포스트가 있을 때 → 수정 피드백 =====
+    // ===== 3. 대기 중인 포스트 확인 =====
     const pending = pendingPosts.get(userId);
-    if (pending && trimmed.length >= 2) {
+
+    // 3-A. 미리보기가 아직 안 된 대기 포스트 → 미리보기 표시
+    if (pending && !pending.previewed) {
+      pending.previewed = true;
+      const elapsed = Date.now() - startTime;
+      console.log(`[DEBUG] 미리보기 재전송 (${elapsed}ms)`);
+      return res.status(200).json(buildTextResponse(buildPreviewText(pending.analysis, pending.url)));
+    }
+
+    // 3-B. 미리보기 완료 + 텍스트 입력 → 수정 피드백
+    if (pending && pending.previewed && trimmed.length >= 2) {
+      // 수정 시작 → previewed를 false로 (수정 완료 후 다시 미리보기 필요)
+      pending.previewed = false;
+
       const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 3500));
       const revisePromise = processRevision(userId, trimmed, userNickname);
       const result = await Promise.race([revisePromise, timeoutPromise]);
 
       let response;
       if (result) {
+        const p = pendingPosts.get(userId);
+        if (p) p.previewed = true;
         response = buildTextResponse(result);
       } else {
         revisePromise
-          .then(r => console.log('백그라운드 수정 완료'))
+          .then(r => {
+            console.log('백그라운드 수정 완료');
+          })
           .catch(err => console.error('백그라운드 수정 오류:', err));
         response = buildTextResponse(
-          '📝 수정 반영 중이에요. 잠시만 기다려주세요.'
+          '📝 수정 반영 중이에요. 잠시 후 아무 메시지나 보내주세요!'
         );
       }
 
@@ -212,13 +235,18 @@ app.post('/webhook', async (req, res) => {
 
       let response;
       if (result) {
+        // 시간 내 완료 → 미리보기 표시됨
+        const p = pendingPosts.get(userId);
+        if (p) p.previewed = true;
         response = buildTextResponse(result);
       } else {
         processPromise
-          .then(r => console.log('수동 요약 백그라운드 완료'))
+          .then(r => {
+            console.log('수동 요약 백그라운드 완료');
+          })
           .catch(err => console.error('수동 요약 백그라운드 오류:', err));
         response = buildTextResponse(
-          '📥 요약 접수 완료!\n\n분석 중이에요. 잠시 후 다시 보내주세요.'
+          '📥 요약 접수 완료!\n\n분석 중이에요. 잠시 후 아무 메시지나 보내주세요!'
         );
       }
 
@@ -229,8 +257,8 @@ app.post('/webhook', async (req, res) => {
 
     // ===== 5. 짧은 텍스트 → 안내 메시지 =====
     return res.status(200).json(buildTextResponse(
-      '📎 링크를 보내주시면 자동으로 분석해서 Teams에 포스팅해드려요!\n\n' +
-      '또는 요약/인사이트를 직접 입력하시면 다든어서 Teams에 올려드릴게요.\n\n' +
+      '📎 �{크를 보내주시면 자동으로 분석해서 Teams에 포스팅해드려요!\n\n' +
+      '또는 요약/인사이트를 직접 입력하시면 다들어서 Teams에 올려드릴게요.\n\n' +
       '예시 1: https://example.com/article\n' +
       '예시 2: 전기차 충전 시장이 2025년 10조원 규모로 성장...'
     ));
@@ -280,7 +308,7 @@ async function processLinkPreview(url, userMemo, userId, userNickname) {
   }
 }
 
-// ===== 수동 요약 → 미리보기 (Teams에 바로 숈 올림) =====
+// ===== 수동 요약 → 미리보기 (Teams에 바로 안 올림) =====
 async function processManualSummaryPreview(userText, userId, userNickname) {
   try {
     console.log(`[수동 요약 처리] 텍스트: ${userText.substring(0, 50)}...`);
@@ -343,8 +371,8 @@ function buildTextResponse(text) {
   };
 }
 
-// ===== 서버 시작 =====
+// ===== 서버 포스팅 =====
 app.listen(PORT, () => {
-  console.log(`🚀 EVS Intel Bot v4.0 서버 시작: http://localhost:${PORT}`);
+  console.log(`🚀 EVS Intel Bot v4.1 서버 포스팅: http://localhost:${PORT}`);
   console.log(`📡 웹훅 URL: http://localhost:${PORT}/webhook`);
 });

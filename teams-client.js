@@ -2,7 +2,7 @@
  * Microsoft Teams Workflows 클라이언트 — Adaptive Card로 분석 결과를 Teams 채널에 포스팅
  *
  * Teams Workflows webhook URL로 POST 요청을 보내 채널에 메시지를 게시합니다.
- * (기존 Incoming Webhook 커넥터의 공식 대체 방숝)
+ * (기존 Incoming Webhook 커넥터의 공식 대체 방식)
  */
 
 const axios = require('axios');
@@ -10,11 +10,12 @@ const axios = require('axios');
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
 
 /**
- * 불릿포인트 배열을 Adaptive Card용 텍스트로 변환
+ * 불멿포인트 배열을 Adaptive Card용 텍스트로 변환
+ * \n\n (이중 줄바꿈)으로 각 불릿 사이에 간격 확보
  */
 function formatBullets(arr) {
   if (Array.isArray(arr)) {
-    return arr.map(item => `• ${item}`).join('\n');
+    return arr.map(item => `• ${item}`).join('\n\n');
   }
   return arr || '';
 }
@@ -22,7 +23,7 @@ function formatBullets(arr) {
 /**
  * Adaptive Card를 만들어 Teams 채널에 포스팅
  */
-async function postToTeams({ title, url, userMemo, category, summary, insight, importance }) {
+async function postToTeams({ title, url, userMemo, category, summary, insight, importance, author }) {
   if (!TEAMS_WEBHOOK_URL) {
     console.error('TEAMS_WEBHOOK_URL이 설정되지 않았습니다.');
     return { success: false, error: 'TEAMS_WEBHOOK_URL 미설정' };
@@ -31,7 +32,7 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
   try {
     // 카테고리별 색상
     const categoryColors = {
-      '길술동향': 'Good',
+      '기술동향': 'Good',
       '시장동향': 'Accent',
       '정부정책': 'Warning',
       '경쟁사/레퍼런스': 'Accent',
@@ -57,9 +58,12 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
     const color = categoryColors[category] || 'Default';
     const today = new Date().toISOString().split('T')[0];
 
-    // summary/insight를 불릿포인트 텍스트로 변환
+    // summary/insight를 불릿포인트 텍스튼로 변환
     const summaryText = formatBullets(summary);
     const insightText = formatBullets(insight);
+
+    // 작성자 표시
+    const authorDisplay = author && author !== '알 수 없음' ? author : '';
 
     // Adaptive Card v1.4 (Teams 호환)
     const cardBody = [
@@ -72,7 +76,7 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
         wrap: true,
         style: color,
       },
-      // 메타 정보
+      // 메타 정보: 중요도 + 날짜 + 작성자
       {
         type: 'ColumnSet',
         columns: [
@@ -100,6 +104,18 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
               },
             ],
           },
+          ...(authorDisplay ? [{
+            type: 'Column',
+            width: 'auto',
+            items: [
+              {
+                type: 'TextBlock',
+                text: `✍️ ${authorDisplay}`,
+                size: 'Small',
+                isSubtle: true,
+              },
+            ],
+          }] : []),
         ],
       },
       // 구분선
@@ -110,7 +126,7 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
         isSubtle: true,
         spacing: 'Small',
       },
-      // AI 요약 (불릿포인트)
+      // AI 요약 (불멿포인트)
       {
         type: 'TextBlock',
         text: '📝 **AI 요약**',
@@ -160,7 +176,7 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
       );
     }
 
-    // 액션 버튼 (URL이 있는 경우에만)
+    // 액션 버튼 (URL이 있는 경우에마)
     const actions = [];
     if (url) {
       actions.push({
@@ -192,7 +208,7 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
       timeout: 10000,
     });
 
-    console.log(`✅ Teams 포스팅 성공: ${title}`);
+    console.log(`✅ Teams 포스팅 성공: ${title} (작성자: ${authorDisplay || 'N/A'})`);
     return { success: true };
 
   } catch (error) {

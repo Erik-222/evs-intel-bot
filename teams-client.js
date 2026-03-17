@@ -10,7 +10,7 @@ const axios = require('axios');
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
 
 /**
- * 불멿포인트 배열을 Adaptive Card용 텍스트로 변환
+ * 불릿포인트 배열을 Adaptive Card용 텍스트로 변환
  * \n\n (이중 줄바꿈)으로 각 불릿 사이에 간격 확보
  */
 function formatBullets(arr) {
@@ -23,7 +23,7 @@ function formatBullets(arr) {
 /**
  * Adaptive Card를 만들어 Teams 채널에 포스팅
  */
-async function postToTeams({ title, url, userMemo, category, summary, insight, importance, author }) {
+async function postToTeams({ title, url, userMemo, category, summary_what, summary_analysis, summary_evs, importance, author }) {
   if (!TEAMS_WEBHOOK_URL) {
     console.error('TEAMS_WEBHOOK_URL이 설정되지 않았습니다.');
     return { success: false, error: 'TEAMS_WEBHOOK_URL 미설정' };
@@ -58,9 +58,10 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
     const color = categoryColors[category] || 'Default';
     const today = new Date().toISOString().split('T')[0];
 
-    // summary/insight를 불릿포인트 텍스튼로 변환
-    const summaryText = formatBullets(summary);
-    const insightText = formatBullets(insight);
+    // 3섹션 불릿포인트 텍스트로 변환
+    const whatText = formatBullets(summary_what);
+    const analysisText = formatBullets(summary_analysis);
+    const evsText = formatBullets(summary_evs);
 
     // 작성자 표시
     const authorDisplay = author && author !== '알 수 없음' ? author : '';
@@ -126,31 +127,45 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
         isSubtle: true,
         spacing: 'Small',
       },
-      // AI 요약 (불멿포인트)
+      // ❓ 이게 무엇인가?
       {
         type: 'TextBlock',
-        text: '📝 **AI 요약**',
+        text: '❓ **이게 무엇인가?**',
         weight: 'Bolder',
         size: 'Small',
         spacing: 'Medium',
       },
       {
         type: 'TextBlock',
-        text: summaryText,
+        text: whatText,
         wrap: true,
         size: 'Default',
       },
-      // EVS 인사이트 (불릿포인트)
+      // 🔍 핵심 분석
       {
         type: 'TextBlock',
-        text: '💡 **EVS 인사이트**',
+        text: '🔍 **핵심 분석**',
         weight: 'Bolder',
         size: 'Small',
         spacing: 'Medium',
       },
       {
         type: 'TextBlock',
-        text: insightText,
+        text: analysisText,
+        wrap: true,
+        size: 'Default',
+      },
+      // 💡 EVS 활용
+      {
+        type: 'TextBlock',
+        text: '💡 **EVS 활용**',
+        weight: 'Bolder',
+        size: 'Small',
+        spacing: 'Medium',
+      },
+      {
+        type: 'TextBlock',
+        text: evsText,
         wrap: true,
         size: 'Default',
       },
@@ -176,7 +191,7 @@ async function postToTeams({ title, url, userMemo, category, summary, insight, i
       );
     }
 
-    // 액션 버튼 (URL이 있는 경우에마)
+    // 액션 버튼 (URL이 있는 경우에만)
     const actions = [];
     if (url) {
       actions.push({

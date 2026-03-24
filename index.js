@@ -1,5 +1,5 @@
 /**
- * EVS Intel Bot - 카카오톡 챗봇 웹훅 서버 v5.3
+ * EVS Intel Bot - 카카오톡 챗봇 웹훅 서버 v5.4
  *
  * 흐름: 카톡 수신 → 크롤링/분석 → 카톡 프리뷰 → 확인/수정 → Teams 게시
  *
@@ -94,7 +94,7 @@ function buildPostedText(analysis, url) {
 
 // ===== 여스체크 =====
 app.get('/', (req, res) => {
-  res.status(200).json({ status: 'ok', bot: 'EVS Intel Bot', version: '5.3.0' });
+  res.status(200).json({ status: 'ok', bot: 'EVS Intel Bot', version: '5.4.0' });
 });
 
 // ===== 카카오 오픈빌더 스킬 테스트용 GET =====
@@ -176,15 +176,19 @@ app.post('/webhook', async (req, res) => {
 
       let response;
       if (result) {
+        // 3.5초 안에 분석 완료 → 프리뷰 바로 전송
+        const p = pendingPosts.get(userId);
+        if (p) { p.previewShown = true; pendingPosts.set(userId, p); }
         response = buildTextResponse(result);
       } else {
+        // 3.5초 초과 → 백그라운드 분석 계속, 완료되면 pendingPosts에 저장됨
         processPromise
           .then(r => {
-            console.log('백그라운드 링크 분석 완료');
+            console.log('백그라운드 링크 분석 완료 — 다음 메시지에 프리뷰 전송 예정');
           })
           .catch(err => console.error('백그라운드 링크 오류:', err));
         response = buildTextResponse(
-          `📥 링크 접수!\n${url}\n\n분석 중이에요. 잠시 후 프리뷰를 보내드릴게요!`
+          `📥 링크 접수!\n${url}\n\n분석 중이에요. 완료되메 아무 말이나 입력해주세요!`
         );
       }
 
@@ -193,32 +197,50 @@ app.post('/webhook', async (req, res) => {
       return res.status(200).json(response);
     }
 
-    // ===== 3. 대기 중인 포스트 확인 (수정 피드백) =====
+    // ===== 3. 대기 중인 포스트 확인 =====
     const pending = pendingPosts.get(userId);
 
-    if (pending && !pending.posted && trimmed.length >= 2) {
-      // 수정 피드백 → AI 재수정 → 카톡 프리뷰 재전송
-      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 3500));
-      const revisePromise = processRevision(userId, trimmed, userNickname);
-      const result = await Promise.race([revisePromise, timeoutPromise]);
-
-      let response;
-      if (result) {
-        response = buildTextResponse(result);
-      } else {
-        revisePromise
-          .then(r => {
-            console.log('백그라운드 수정 완료');
-          })
-          .catch(err => console.error('백그라운드 수정 오류:', err));
-        response = buildTextResponse(
-          '📝 수정 반영 중이에요. 잠시 후 수정본을 보내드릴게요!'
-        );
+    if (pending && !pending.posted) {
+      // 3-A. 프리뷰가 아직 안 보여진 경우 → 저장된 프리뷰 바로 전송
+      if (!pending.previewShown && pending.analysis) {
+        pending.previewShown = true;
+        pendingPosts.set(userId, pending);
+        console.log(`[프리뷰 재전송] userId: ${userId.substring(0, 8)}, title: ${pending.analysis.title}`);
+        const elapsed = Date.now() - startTime;
+        console.log(`[DEBUG] 저장된 프리뷰 전송 (${elapsed}ms)`);
+        return res.status(200).json(buildTextResponse(
+          buildPreviewText(pending.analysis, pending.url)
+        ));
       }
 
-      const elapsed = Date.now() - startTime;
-      console.log(`[DEBUG] 수정 처리 응답 (${elapsed}ms)`);
-      return res.status(200).json(response);
+      // 3-B. 프리뷰는 봤고 + 수정 피드백 입력 (2자 이상)
+      if (pending.previewShown && trimmed.length >= 2) {
+        const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 3500));
+        const revisePromise = processRevision(userId, trimmed, userNickname);
+        const result = await Promise.race([revisePromise, timeoutPromise]);
+
+        let response;
+        if (result) {
+          // 수정 완료 → 프리뷰 다시 보여줌 (previewShown 유지)
+          response = buildTextResponse(result);
+        } else {
+          revisePromise
+            .then(r => {
+              console.log('백그라운드 수정 완료 — 다음 메시지에 수정본 전송 예정');
+              // 수정 완료 후 previewShown을 false로 → 다음 메시지에 바로 보여줌
+              const p = pendingPosts.get(userId);
+              if (p) { p.previewShown = false; pendingPosts.set(userId, p); }
+            })
+            .catch(err => console.error('백그라운드 수정 오류:', err));
+          response = buildTextResponse(
+            '📝 수정 반영 중이에요. 완료되면 아무 말이나 입력해주세요!'
+          );
+        }
+
+        const elapsed = Date.now() - startTime;
+        console.log(`[DEBUG] 수정 처리 응답 (${elapsed}ms)`);
+        return res.status(200).json(response);
+      }
     }
 
     // ===== 4. URL 없음 + 대기 없음 + 15자 이상 → 수동 요약 → 카톡 프리뷰 =====
@@ -229,15 +251,17 @@ app.post('/webhook', async (req, res) => {
 
       let response;
       if (result) {
+        const p = pendingPosts.get(userId);
+        if (p) { p.previewShown = true; pendingPosts.set(userId, p); }
         response = buildTextResponse(result);
       } else {
         processPromise
           .then(r => {
-            console.log('수동 요약 백그라운드 완료');
+            console.log('수동 요약 백그라운드 완료 — 다음 메시지에 프리뷰 전송 예정');
           })
           .catch(err => console.error('수동 요약 백그라운드 오류:', err));
         response = buildTextResponse(
-          '📥 요약 접수!\n\n분석 중이에요. 잠시 후 프리뷰를 보내드릴게요!'
+          '📥 요약 접수!\n\n분석 중이에요. 완료되면 아무 말이나 입력해주세요!'
         );
       }
 
@@ -248,8 +272,8 @@ app.post('/webhook', async (req, res) => {
 
     // ===== 5. 짧은 텍스트 → 안내 메시지 =====
     return res.status(200).json(buildTextResponse(
-      '📎 링크를 보내주시면 자동으로 분석해서 프리뷰를 보내드려요!\n\n' +
-      '또는 요약/인사이트를 직접 입력한시면 다듬어서 프리뷰를 보내드릴게요.\n\n' +
+      '📎 링크를 보내주시메 자동으로 분석해서 프리뷰를 보내드려요!\n\n' +
+      '또는 요약/인사이트를 직접 입력하시메 다들어서 프리뷰를 보내드릴게요.\n\n' +
       '예시 1: https://example.com/article\n' +
       '예시 2: 전기차 충전 시장이 2025년 10조원 규모로 성장...'
     ));
@@ -280,13 +304,14 @@ async function processLinkPreview(url, userMemo, userId, userNickname) {
     console.log(`[AI 분석] ${crawled.title}`);
     const analysis = await analyzeContent(crawled.title, crawled.content, url, userMemo);
 
-    // 3. 프리뷰 대기 상태 저장 (Teams 미전송)
+    // 3. 프리뷰 대기 상태 저장 (Teams 미전송, previewShown은 호출자가 설정)
     pendingPosts.set(userId, {
       analysis,
       url,
       userMemo,
       author: userNickname,
       posted: false,
+      previewShown: false,
       createdAt: Date.now(),
     });
 
@@ -306,13 +331,14 @@ async function processManualPreview(userText, userId, userNickname) {
     console.log(`[수동 요약 처리] 텍스트: ${userText.substring(0, 50)}...`);
     const analysis = await polishUserSummary(userText);
 
-    // 프리뷰 대기 상태 저장 (Teams 미전송)
+    // 프리뷰 대기 상태 저장 (Teams 미전송, previewShown은 호출자가 설정)
     pendingPosts.set(userId, {
       analysis,
       url: '',
       userMemo: '',
       author: userNickname,
       posted: false,
+      previewShown: false,
       createdAt: Date.now(),
     });
 
@@ -370,6 +396,6 @@ function buildTextResponse(text) {
 
 // ===== 서버 시작 =====
 app.listen(PORT, () => {
-  console.log(`🚀 EVS Intel Bot v5.3 서버 시작: http://localhost:${PORT}`);
+  console.log(`🚀 EVS Intel Bot v5.4 서버 시작: http://localhost:${PORT}`);
   console.log(`📡 웹훅 URL: http://localhost:${PORT}/webhook`);
 });
